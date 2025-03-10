@@ -1,0 +1,8 @@
+flask
+openai
+faiss-cpu
+numpy
+sentence-transformers
+python-docx
+werkzeug
+gunicorn
