@@ -83,6 +83,10 @@ def ask_question():
     answer = chat_with_docx(query, index, sentences)
     return jsonify({"response": answer})
 
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({"message": "API is running!"})
+
 # Run Flask App
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
