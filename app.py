@@ -14,8 +14,12 @@ app.config["UPLOAD_FOLDER"] = "uploads"
 # Ensure upload folder exists
 os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
 
-# Load AI model for FAISS
+# ✅ Load AI model **once** at startup (instead of per request)
 model = SentenceTransformer("all-MiniLM-L6-v2")
+
+# ✅ Declare global variables for FAISS index & document sentences
+index = None
+sentences = []
 
 # Function to extract text from .docx
 def extract_text_from_docx(docx_path):
@@ -24,8 +28,11 @@ def extract_text_from_docx(docx_path):
     sentences = text.split(". ")  # Split into smaller chunks
     return sentences
 
-# Create FAISS index
+# Create FAISS index (but limit memory usage)
 def create_faiss_index(sentences):
+    max_sentences = 200  # ✅ Limit to 200 sentences max to save memory
+    sentences = sentences[:max_sentences]
+
     embeddings = model.encode(sentences)
     index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(np.array(embeddings))
@@ -33,12 +40,15 @@ def create_faiss_index(sentences):
 
 # Search for relevant document chunks
 def search_document(query, index, sentences):
+    if index is None or not sentences:
+        return "No document uploaded yet."
+
     query_vector = model.encode([query])
     _, top_match = index.search(np.array(query_vector), 1)
     return sentences[top_match[0][0]] if top_match[0][0] >= 0 else "No relevant information found."
 
 # Query ChatGPT with relevant text
-def chat_with_docx(query, index, sentences):
+def chat_with_docx(query):
     relevant_text = search_document(query, index, sentences)
     client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -54,6 +64,8 @@ def chat_with_docx(query, index, sentences):
 # Flask Route: Upload Document
 @app.route("/upload", methods=["POST"])
 def upload_file():
+    global index, sentences  # ✅ Use global variables
+
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
 
@@ -65,7 +77,7 @@ def upload_file():
     filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
     file.save(filepath)
 
-    global index, sentences
+    # ✅ Create FAISS index only once after upload
     sentences = extract_text_from_docx(filepath)
     index, sentences = create_faiss_index(sentences)
 
@@ -74,15 +86,22 @@ def upload_file():
 # Flask Route: Ask Question
 @app.route("/ask", methods=["POST"])
 def ask_question():
+    global index, sentences  # ✅ Use global variables
+
     data = request.json
     query = data.get("query")
 
     if not query:
         return jsonify({"error": "No query provided"}), 400
 
-    answer = chat_with_docx(query, index, sentences)
+    if index is None or not sentences:
+        return jsonify({"error": "No document uploaded yet"}), 400
+
+    # ✅ Query FAISS for relevant content
+    answer = chat_with_docx(query)
     return jsonify({"response": answer})
 
+# Flask Route: API Health Check
 @app.route("/", methods=["GET"])
 def home():
     return jsonify({"message": "API is running!"})
